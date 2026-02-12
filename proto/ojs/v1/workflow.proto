@@ -1,0 +1,211 @@
+// Copyright 2026 The Open Job Spec Authors
+// SPDX-License-Identifier: Apache-2.0
+//
+// Workflow types for the Open Job Spec gRPC protocol binding.
+// See: ojs-workflows.md
+// See: ojs-grpc-binding.md Section 6.9 (Workflow Messages)
+
+syntax = "proto3";
+
+package ojs.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "ojs/v1/job.proto";
+
+option go_package = "github.com/openjobspec/ojs-proto/gen/go/ojs/v1;ojsv1";
+option java_multiple_files = true;
+option java_package = "org.openjobspec.ojs.v1";
+
+// Workflow represents a composition of jobs that execute in a defined order
+// with dependency relationships.
+//
+// See: ojs-workflows.md
+// See: ojs-grpc-binding.md Section 6.9 (Workflow)
+message Workflow {
+  // Unique workflow identifier (UUIDv7).
+  string id = 1;
+
+  // Human-readable workflow name.
+  string name = 2;
+
+  // Current workflow state.
+  //
+  // See: ojs-workflows.md (workflow states)
+  WorkflowState state = 3;
+
+  // Steps with their current states and assigned job IDs.
+  repeated WorkflowStepStatus steps = 4;
+
+  // Timestamp when the workflow was created.
+  google.protobuf.Timestamp created_at = 5;
+
+  // Timestamp when the workflow completed (if in a terminal state).
+  google.protobuf.Timestamp completed_at = 6;
+}
+
+// WorkflowState enumerates the lifecycle states of a workflow.
+//
+// See: ojs-workflows.md (workflow states)
+enum WorkflowState {
+  // Default value. MUST NOT be used in valid workflow instances.
+  WORKFLOW_STATE_UNSPECIFIED = 0;
+
+  // The workflow is actively executing. At least one step is pending or active.
+  WORKFLOW_STATE_RUNNING = 1;
+
+  // All workflow steps completed successfully. Terminal state.
+  WORKFLOW_STATE_COMPLETED = 2;
+
+  // A workflow step failed terminally (exhausted retries). Terminal state.
+  WORKFLOW_STATE_FAILED = 3;
+
+  // The workflow was intentionally cancelled. Terminal state.
+  WORKFLOW_STATE_CANCELLED = 4;
+}
+
+// WorkflowStep defines a single step in a workflow.
+//
+// Each step corresponds to a job that will be enqueued when its dependencies
+// are satisfied.
+//
+// See: ojs-workflows.md
+// See: ojs-grpc-binding.md Section 6.9 (WorkflowStep)
+message WorkflowStep {
+  // Required. Unique step identifier within the workflow.
+  string id = 1;
+
+  // Required. Job type for this step (dot-namespaced).
+  //
+  // See: ojs-core.md Section 5.1 (type)
+  string type = 2;
+
+  // Arguments for the step's job.
+  //
+  // See: ojs-core.md Section 5.1 (args)
+  repeated google.protobuf.Value args = 3;
+
+  // Step IDs that must complete before this step can execute.
+  // An empty list means the step has no dependencies and can start immediately.
+  //
+  // See: ojs-workflows.md (depends_on)
+  repeated string depends_on = 4;
+
+  // Optional per-step enqueue options.
+  EnqueueOptions options = 5;
+}
+
+// WorkflowStepStatus tracks the runtime state of a workflow step.
+//
+// See: ojs-grpc-binding.md Section 6.9 (WorkflowStepStatus)
+message WorkflowStepStatus {
+  // Step identifier (matches WorkflowStep.id).
+  string id = 1;
+
+  // Job type for this step.
+  string type = 2;
+
+  // Current step state.
+  //
+  // See: ojs-workflows.md (step states)
+  WorkflowStepState state = 3;
+
+  // Assigned job ID. Set once the step's job has been enqueued.
+  string job_id = 4;
+
+  // Step dependencies (echoed from the step definition).
+  repeated string depends_on = 5;
+}
+
+// WorkflowStepState enumerates the lifecycle states of a workflow step.
+//
+// See: ojs-workflows.md (step states)
+enum WorkflowStepState {
+  // Default value. MUST NOT be used in valid step instances.
+  WORKFLOW_STEP_STATE_UNSPECIFIED = 0;
+
+  // The step is waiting for its dependencies to complete.
+  WORKFLOW_STEP_STATE_WAITING = 1;
+
+  // The step's dependencies are satisfied and its job has been enqueued.
+  WORKFLOW_STEP_STATE_PENDING = 2;
+
+  // The step's job is currently being executed by a worker.
+  WORKFLOW_STEP_STATE_ACTIVE = 3;
+
+  // The step's job completed successfully.
+  WORKFLOW_STEP_STATE_COMPLETED = 4;
+
+  // The step's job failed permanently (retries exhausted).
+  WORKFLOW_STEP_STATE_FAILED = 5;
+
+  // The step was cancelled (either directly or as part of workflow cancellation).
+  WORKFLOW_STEP_STATE_CANCELLED = 6;
+}
+
+// CreateWorkflowRequest is the request message for the CreateWorkflow RPC.
+//
+// Creates and starts a new workflow. The first step(s) with no dependencies
+// are enqueued immediately.
+//
+// Conformance level: 3 (Orchestration).
+//
+// See: ojs-grpc-binding.md Section 6.9 (CreateWorkflow)
+message CreateWorkflowRequest {
+  // Required. Human-readable workflow name.
+  string name = 1;
+
+  // Required. Ordered list of workflow steps. At least one step MUST be provided.
+  repeated WorkflowStep steps = 2;
+}
+
+// CreateWorkflowResponse is the response message for the CreateWorkflow RPC.
+//
+// See: ojs-grpc-binding.md Section 6.9 (CreateWorkflowResponse)
+message CreateWorkflowResponse {
+  // The created workflow with server-assigned ID and initial step states.
+  Workflow workflow = 1;
+}
+
+// GetWorkflowRequest is the request message for the GetWorkflow RPC.
+//
+// Retrieves the current state of a workflow and all its steps.
+//
+// Conformance level: 3 (Orchestration).
+//
+// See: ojs-grpc-binding.md Section 6.9 (GetWorkflow)
+message GetWorkflowRequest {
+  // Required. Workflow identifier (UUIDv7).
+  string workflow_id = 1;
+}
+
+// GetWorkflowResponse is the response message for the GetWorkflow RPC.
+//
+// See: ojs-grpc-binding.md Section 6.9 (GetWorkflowResponse)
+message GetWorkflowResponse {
+  // The workflow with current state and step statuses.
+  Workflow workflow = 1;
+}
+
+// CancelWorkflowRequest is the request message for the CancelWorkflow RPC.
+//
+// Cancels a running workflow and all of its pending/active steps.
+//
+// Conformance level: 3 (Orchestration).
+//
+// See: ojs-grpc-binding.md Section 6.9 (CancelWorkflow)
+message CancelWorkflowRequest {
+  // Required. Workflow identifier (UUIDv7).
+  string workflow_id = 1;
+
+  // Optional reason for cancellation.
+  string reason = 2;
+}
+
+// CancelWorkflowResponse is the response message for the CancelWorkflow RPC.
+//
+// See: ojs-grpc-binding.md Section 6.9 (CancelWorkflowResponse)
+message CancelWorkflowResponse {
+  // The workflow after cancellation, with state set to CANCELLED.
+  Workflow workflow = 1;
+}
