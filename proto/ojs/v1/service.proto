@@ -1,0 +1,518 @@
+// Copyright 2026 The Open Job Spec Authors
+// SPDX-License-Identifier: Apache-2.0
+//
+// gRPC service definition and system messages for the Open Job Spec.
+//
+// This file defines the OJSService which maps every OJS logical operation
+// (PUSH, FETCH, ACK, FAIL, BEAT, CANCEL, INFO) to a gRPC RPC method.
+//
+// See: ojs-core.md Section 7 (Logical Operations)
+// See: ojs-grpc-binding.md Section 4 (Logical Operation Mapping),
+//      Section 5 (Protobuf Service Definition)
+
+syntax = "proto3";
+
+package ojs.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "ojs/v1/events.proto";
+import "ojs/v1/job.proto";
+import "ojs/v1/queue.proto";
+import "ojs/v1/worker.proto";
+import "ojs/v1/workflow.proto";
+
+option go_package = "github.com/openjobspec/ojs-proto/gen/go/ojs/v1;ojsv1";
+option java_multiple_files = true;
+option java_package = "org.openjobspec.ojs.v1";
+
+// OJSService is the gRPC service for the Open Job Spec protocol binding.
+//
+// Implementations MUST implement all RPCs corresponding to their declared
+// conformance level. Implementations MUST NOT remove or rename any RPC method;
+// unsupported methods MUST return UNIMPLEMENTED.
+//
+// Conformance levels:
+//   Level 0 (Core):          Manifest, Health, Enqueue, Fetch, Ack, Nack, ListQueues
+//   Level 1 (Reliable):      Level 0 + GetJob, CancelJob, Heartbeat, ListDeadLetter,
+//                             RetryDeadLetter, DeleteDeadLetter
+//   Level 2 (Scheduled):     Level 1 + RegisterCron, UnregisterCron, ListCron
+//   Level 3 (Orchestration): Level 2 + CreateWorkflow, GetWorkflow, CancelWorkflow
+//   Level 4 (Advanced):      Level 3 + EnqueueBatch, QueueStats, PauseQueue, ResumeQueue
+//   Optional (any level):    StreamJobs, StreamEvents
+//
+// See: ojs-grpc-binding.md Section 5 (Protobuf Service Definition),
+//      Section 15 (Conformance Requirements)
+// See: ojs-conformance.md
+service OJSService {
+  // ===========================================================================
+  // System RPCs
+  // ===========================================================================
+
+  // Returns the conformance manifest for this OJS implementation.
+  //
+  // The manifest declares the implementation name, version, conformance level,
+  // supported protocols, backend type, and enabled extensions. Clients use
+  // this to discover server capabilities at runtime.
+  //
+  // Conformance level: 0 (Core).
+  //
+  // See: ojs-conformance.md (Conformance Manifest)
+  // See: ojs-grpc-binding.md Section 6.2 (Manifest)
+  rpc Manifest(ManifestRequest) returns (ManifestResponse);
+
+  // Returns the health status of the OJS server and its backend.
+  //
+  // Implementations SHOULD also implement the standard gRPC Health Checking
+  // Protocol (grpc.health.v1.Health) for Kubernetes and load balancer
+  // compatibility.
+  //
+  // Conformance level: 0 (Core).
+  //
+  // See: ojs-grpc-binding.md Section 6.2 (Health), Section 15.3
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // ===========================================================================
+  // Job RPCs
+  // ===========================================================================
+
+  // Enqueues a single job. Maps to the PUSH logical operation.
+  //
+  // The implementation validates the job envelope, assigns system-managed
+  // attributes (id, state, created_at, enqueued_at), and returns the
+  // complete job envelope.
+  //
+  // Conformance level: 0 (Core).
+  //
+  // See: ojs-core.md Section 7.1 (PUSH)
+  // See: ojs-grpc-binding.md Section 4 (Logical Operation Mapping)
+  rpc Enqueue(EnqueueRequest) returns (EnqueueResponse);
+
+  // Enqueues multiple jobs atomically. Maps to PUSH (batch).
+  //
+  // Either all jobs in the batch MUST be enqueued or none. Supports
+  // default options that apply to all jobs, with per-job overrides.
+  //
+  // Conformance level: 4 (Advanced).
+  //
+  // See: ojs-core.md Section 7.1 (Batch variant)
+  rpc EnqueueBatch(EnqueueBatchRequest) returns (EnqueueBatchResponse);
+
+  // Retrieves the current state and data of a job by ID.
+  // Maps to the INFO logical operation.
+  //
+  // This is a read-only operation with no side effects. Returns NOT_FOUND
+  // if the job does not exist.
+  //
+  // Conformance level: 1 (Reliable).
+  //
+  // See: ojs-core.md Section 7.7 (INFO)
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+
+  // Cancels a job that has not yet reached a terminal state.
+  // Maps to the CANCEL logical operation.
+  //
+  // Cancellation is idempotent: cancelling an already-cancelled job
+  // succeeds without error.
+  //
+  // Conformance level: 1 (Reliable).
+  //
+  // See: ojs-core.md Section 7.6 (CANCEL)
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+
+  // ===========================================================================
+  // Worker RPCs
+  // ===========================================================================
+
+  // Fetches one or more jobs from the specified queues for processing.
+  // Maps to the FETCH logical operation. This is the unary (polling) variant.
+  //
+  // The implementation selects the highest-priority available job from the
+  // specified queues (checked in left-to-right order). The job transitions
+  // to active atomically.
+  //
+  // Conformance level: 0 (Core).
+  //
+  // See: ojs-core.md Section 7.2 (FETCH)
+  rpc Fetch(FetchRequest) returns (FetchResponse);
+
+  // Acknowledges successful completion of a job.
+  // Maps to the ACK logical operation.
+  //
+  // The job transitions from active to completed. Optional result data
+  // is stored in the job's result attribute.
+  //
+  // Conformance level: 0 (Core).
+  //
+  // See: ojs-core.md Section 7.3 (ACK)
+  rpc Ack(AckRequest) returns (AckResponse);
+
+  // Reports job failure with structured error information.
+  // Maps to the FAIL logical operation.
+  //
+  // The implementation evaluates the retry policy and transitions the job
+  // to either retryable (if attempts remain) or discarded (if exhausted).
+  //
+  // Conformance level: 0 (Core).
+  //
+  // See: ojs-core.md Section 7.4 (FAIL)
+  rpc Nack(NackRequest) returns (NackResponse);
+
+  // Extends the visibility timeout for an active job and reports worker state.
+  // Maps to the BEAT logical operation.
+  //
+  // The server MAY respond with a directive to change the worker's lifecycle
+  // state (running, quiet, terminate).
+  //
+  // Conformance level: 1 (Reliable).
+  //
+  // See: ojs-core.md Section 7.5 (BEAT), Section 10 (Worker Lifecycle)
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // ===========================================================================
+  // Streaming RPCs
+  // ===========================================================================
+
+  // Opens a server-streaming connection that pushes jobs to the worker
+  // as they become available. High-throughput alternative to polling via Fetch.
+  //
+  // The server respects the max_concurrent limit (backpressure). Each job
+  // delivered on the stream MUST be acknowledged via a separate Ack or Nack
+  // unary RPC. On disconnect, unacknowledged jobs are reclaimed after their
+  // visibility timeout expires.
+  //
+  // Conformance level: OPTIONAL (any level).
+  //
+  // See: ojs-grpc-binding.md Section 10.1 (StreamJobs semantics)
+  rpc StreamJobs(StreamJobsRequest) returns (stream Job);
+
+  // Opens a server-streaming connection that delivers real-time lifecycle
+  // events. Used for monitoring dashboards and observability tooling.
+  //
+  // Events are delivered on a best-effort basis. The server SHOULD send a
+  // keepalive event (type "stream.keepalive") every 30 seconds on idle streams.
+  //
+  // Conformance level: OPTIONAL (any level).
+  //
+  // See: ojs-grpc-binding.md Section 10.2 (StreamEvents semantics)
+  rpc StreamEvents(StreamEventsRequest) returns (stream Event);
+
+  // ===========================================================================
+  // Queue RPCs
+  // ===========================================================================
+
+  // Lists all known queues.
+  //
+  // Conformance level: 0 (Core).
+  rpc ListQueues(ListQueuesRequest) returns (ListQueuesResponse);
+
+  // Returns statistics for a specific queue.
+  //
+  // Conformance level: 4 (Advanced).
+  rpc QueueStats(QueueStatsRequest) returns (QueueStatsResponse);
+
+  // Pauses a queue, preventing workers from fetching new jobs from it.
+  // Active jobs in the queue are not affected.
+  //
+  // Conformance level: 4 (Advanced).
+  rpc PauseQueue(PauseQueueRequest) returns (PauseQueueResponse);
+
+  // Resumes a previously paused queue.
+  //
+  // Conformance level: 4 (Advanced).
+  rpc ResumeQueue(ResumeQueueRequest) returns (ResumeQueueResponse);
+
+  // ===========================================================================
+  // Dead Letter RPCs
+  // ===========================================================================
+
+  // Lists jobs in the dead letter queue.
+  //
+  // Conformance level: 1 (Reliable).
+  rpc ListDeadLetter(ListDeadLetterRequest) returns (ListDeadLetterResponse);
+
+  // Retries a specific dead letter job by re-enqueueing it.
+  //
+  // Conformance level: 1 (Reliable).
+  //
+  // See: ojs-core.md Section 6.3 (discarded -> available transition)
+  rpc RetryDeadLetter(RetryDeadLetterRequest) returns (RetryDeadLetterResponse);
+
+  // Permanently deletes a dead letter job.
+  //
+  // Conformance level: 1 (Reliable).
+  rpc DeleteDeadLetter(DeleteDeadLetterRequest) returns (DeleteDeadLetterResponse);
+
+  // ===========================================================================
+  // Cron RPCs
+  // ===========================================================================
+
+  // Registers a new cron (periodic) job schedule.
+  //
+  // Conformance level: 2 (Scheduled).
+  //
+  // See: ojs-cron.md
+  rpc RegisterCron(RegisterCronRequest) returns (RegisterCronResponse);
+
+  // Removes a registered cron job schedule.
+  //
+  // Conformance level: 2 (Scheduled).
+  //
+  // See: ojs-cron.md
+  rpc UnregisterCron(UnregisterCronRequest) returns (UnregisterCronResponse);
+
+  // Lists all registered cron job schedules.
+  //
+  // Conformance level: 2 (Scheduled).
+  //
+  // See: ojs-cron.md
+  rpc ListCron(ListCronRequest) returns (ListCronResponse);
+
+  // ===========================================================================
+  // Workflow RPCs
+  // ===========================================================================
+
+  // Creates and starts a new workflow.
+  //
+  // Conformance level: 3 (Orchestration).
+  //
+  // See: ojs-workflows.md
+  rpc CreateWorkflow(CreateWorkflowRequest) returns (CreateWorkflowResponse);
+
+  // Retrieves the current state of a workflow and all its steps.
+  //
+  // Conformance level: 3 (Orchestration).
+  //
+  // See: ojs-workflows.md
+  rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
+
+  // Cancels a running workflow and all of its pending/active steps.
+  //
+  // Conformance level: 3 (Orchestration).
+  //
+  // See: ojs-workflows.md
+  rpc CancelWorkflow(CancelWorkflowRequest) returns (CancelWorkflowResponse);
+}
+
+// ===========================================================================
+// System Messages
+// ===========================================================================
+
+// ManifestRequest is the request message for the Manifest RPC.
+//
+// See: ojs-grpc-binding.md Section 6.2 (Manifest)
+message ManifestRequest {}
+
+// ManifestResponse is the response message for the Manifest RPC.
+//
+// Returns the conformance manifest describing the OJS implementation's
+// capabilities, conformance level, and supported features.
+//
+// See: ojs-conformance.md (Conformance Manifest)
+// See: ojs-grpc-binding.md Section 6.2 (ManifestResponse)
+message ManifestResponse {
+  // OJS specification version (e.g., "1.0.0-rc.1").
+  //
+  // See: ojs-core.md Section 5.1 (specversion)
+  string ojs_version = 1;
+
+  // Implementation-specific information.
+  Implementation implementation = 2;
+
+  // Declared conformance level (0-4).
+  //
+  // See: ojs-conformance.md (Conformance Levels)
+  int32 conformance_level = 3;
+
+  // Protocols supported by this server (e.g., ["http", "grpc"]).
+  //
+  // See: ojs-grpc-binding.md Section 12.3 (Protocol Declaration)
+  repeated string protocols = 4;
+
+  // Backend type (e.g., "redis", "postgres", "memory", "kafka").
+  //
+  // See: ojs-core.md Section 3 (Backend)
+  string backend = 5;
+
+  // Optional non-standard extensions supported by this implementation.
+  repeated string extensions = 6;
+
+  // Whether payload schema validation is enabled.
+  //
+  // See: ojs-core.md Section 5.2 (schema)
+  bool schema_validation = 7;
+}
+
+// Implementation describes the OJS server implementation.
+//
+// See: ojs-grpc-binding.md Section 6.2 (Implementation)
+message Implementation {
+  // Implementation name (e.g., "ojs-backend-redis").
+  string name = 1;
+
+  // Implementation version following Semantic Versioning 2.0.0 (e.g., "1.0.0").
+  string version = 2;
+
+  // Implementation language (e.g., "go", "typescript", "python").
+  string language = 3;
+}
+
+// HealthRequest is the request message for the Health RPC.
+//
+// See: ojs-grpc-binding.md Section 6.2 (Health)
+message HealthRequest {}
+
+// HealthResponse is the response message for the Health RPC.
+//
+// Returns the overall health status and backend-specific details.
+//
+// See: ojs-grpc-binding.md Section 6.2 (HealthResponse)
+message HealthResponse {
+  // Overall health status of the OJS server.
+  HealthStatus status = 1;
+
+  // Timestamp of the health check.
+  google.protobuf.Timestamp timestamp = 2;
+
+  // Backend-specific health details (e.g., connection pool stats,
+  // replication lag, memory usage).
+  google.protobuf.Struct details = 3;
+}
+
+// HealthStatus enumerates the possible health states of the OJS server.
+//
+// See: ojs-grpc-binding.md Section 6.2 (HealthStatus)
+enum HealthStatus {
+  // Default value. MUST NOT be used in valid health responses.
+  HEALTH_STATUS_UNSPECIFIED = 0;
+
+  // The server and its backend are fully operational.
+  HEALTH_STATUS_OK = 1;
+
+  // The server is operational but experiencing issues (e.g., high latency,
+  // elevated error rate, partial backend unavailability).
+  HEALTH_STATUS_DEGRADED = 2;
+
+  // The server or its backend is not operational.
+  HEALTH_STATUS_UNHEALTHY = 3;
+}
+
+// ===========================================================================
+// Cron Messages
+// ===========================================================================
+
+// RegisterCronRequest is the request message for the RegisterCron RPC.
+//
+// Registers a new cron (periodic) job schedule. The server will automatically
+// enqueue jobs according to the cron expression.
+//
+// Conformance level: 2 (Scheduled).
+//
+// See: ojs-cron.md
+// See: ojs-grpc-binding.md Section 6.8 (RegisterCron)
+message RegisterCronRequest {
+  // Required. Unique name for this cron schedule.
+  // MUST match pattern [a-z0-9][a-z0-9\-\.]*, max 255 characters.
+  //
+  // See: ojs-cron.md (name)
+  string name = 1;
+
+  // Required. Cron expression (5-field standard, with optional 6th field for seconds).
+  // Also supports special expressions: @yearly, @monthly, @weekly, @daily,
+  // @hourly, @every <duration>.
+  //
+  // See: ojs-cron.md (cron expression)
+  string cron = 2;
+
+  // IANA timezone name (e.g., "America/New_York"). Default: "UTC".
+  // MUST NOT use UTC offsets or timezone abbreviations.
+  //
+  // See: ojs-cron.md (timezone)
+  string timezone = 3;
+
+  // Required. Job type to enqueue on each trigger (dot-namespaced).
+  //
+  // See: ojs-core.md Section 5.1 (type)
+  string type = 4;
+
+  // Arguments for the job enqueued on each trigger.
+  //
+  // See: ojs-core.md Section 5.1 (args)
+  repeated google.protobuf.Value args = 5;
+
+  // Enqueue options applied to each generated job.
+  EnqueueOptions options = 6;
+}
+
+// RegisterCronResponse is the response message for the RegisterCron RPC.
+//
+// See: ojs-grpc-binding.md Section 6.8 (RegisterCronResponse)
+message RegisterCronResponse {
+  // Confirmation: the name of the registered cron schedule.
+  string name = 1;
+
+  // The timestamp of the next scheduled trigger.
+  google.protobuf.Timestamp next_run_at = 2;
+}
+
+// UnregisterCronRequest is the request message for the UnregisterCron RPC.
+//
+// Removes a registered cron job schedule. Future triggers will not occur.
+//
+// Conformance level: 2 (Scheduled).
+//
+// See: ojs-cron.md
+// See: ojs-grpc-binding.md Section 6.8 (UnregisterCron)
+message UnregisterCronRequest {
+  // Required. Name of the cron schedule to remove.
+  string name = 1;
+}
+
+// UnregisterCronResponse is the response message for the UnregisterCron RPC.
+message UnregisterCronResponse {}
+
+// ListCronRequest is the request message for the ListCron RPC.
+//
+// Conformance level: 2 (Scheduled).
+//
+// See: ojs-cron.md
+// See: ojs-grpc-binding.md Section 6.8 (ListCron)
+message ListCronRequest {}
+
+// ListCronResponse is the response message for the ListCron RPC.
+//
+// See: ojs-grpc-binding.md Section 6.8 (ListCronResponse)
+message ListCronResponse {
+  // All registered cron schedules.
+  repeated CronEntry entries = 1;
+}
+
+// CronEntry represents a registered cron job schedule.
+//
+// See: ojs-cron.md
+// See: ojs-grpc-binding.md Section 6.8 (CronEntry)
+message CronEntry {
+  // Cron schedule name.
+  string name = 1;
+
+  // Cron expression.
+  string cron = 2;
+
+  // IANA timezone.
+  string timezone = 3;
+
+  // Job type enqueued on each trigger.
+  string type = 4;
+
+  // Job arguments.
+  repeated google.protobuf.Value args = 5;
+
+  // Enqueue options applied to each generated job.
+  EnqueueOptions options = 6;
+
+  // Timestamp of the next scheduled trigger.
+  google.protobuf.Timestamp next_run_at = 7;
+
+  // Timestamp of the last trigger (if any).
+  google.protobuf.Timestamp last_run_at = 8;
+}
