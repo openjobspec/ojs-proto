@@ -1,0 +1,133 @@
+// Copyright 2026 The Open Job Spec Authors
+// SPDX-License-Identifier: Apache-2.0
+//
+// Event types for the Open Job Spec gRPC protocol binding.
+// See: ojs-events.md
+// See: ojs-grpc-binding.md Section 6.1 (Event), 6.5 (StreamEvents), Section 10.2
+
+syntax = "proto3";
+
+package ojs.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/openjobspec/ojs-proto/gen/go/ojs/v1;ojsv1";
+option java_multiple_files = true;
+option java_package = "org.openjobspec.ojs.v1";
+
+// Event represents a lifecycle event emitted by the OJS server.
+//
+// Events provide real-time visibility into job lifecycle transitions,
+// queue operations, worker state changes, and workflow progress.
+//
+// Standard event types include:
+//   - job.enqueued, job.started, job.completed, job.failed (Level 0)
+//   - job.dead, job.retrying, job.heartbeat, job.cancelled (Level 1)
+//   - workflow.started, workflow.step_completed, workflow.completed, workflow.failed (Level 3)
+//   - stream.keepalive (Level 0)
+//
+// See: ojs-events.md for the full event vocabulary
+// See: ojs-grpc-binding.md Section 6.1 (Event), Section 10.2.2 (Event Types)
+message Event {
+  // Unique event identifier. RECOMMENDED format: UUIDv7 with "evt_" prefix.
+  //
+  // See: ojs-events.md (id)
+  string id = 1;
+
+  // Event type using dot-namespaced convention.
+  //
+  // Standard types:
+  //   "job.enqueued"              - Job entered the available state
+  //   "job.started"               - Worker began executing the job
+  //   "job.completed"             - Job handler succeeded
+  //   "job.failed"                - Job handler failed (per attempt)
+  //   "job.dead"                  - Job moved to dead letter queue (discarded)
+  //   "job.retrying"              - Job scheduled for retry
+  //   "job.heartbeat"             - Heartbeat extended for a job
+  //   "job.cancelled"             - Job was cancelled
+  //   "workflow.started"          - First step of a workflow began
+  //   "workflow.step_completed"   - A workflow step completed
+  //   "workflow.completed"        - All workflow steps completed
+  //   "workflow.failed"           - A workflow step failed terminally
+  //   "stream.keepalive"          - Heartbeat to keep the connection alive
+  //
+  // See: ojs-events.md (type)
+  string type = 2;
+
+  // ID of the job this event relates to (if applicable).
+  string job_id = 3;
+
+  // Job type of the related job (if applicable).
+  // Dot-namespaced (e.g., "email.send").
+  string job_type = 4;
+
+  // Queue the related job belongs to (if applicable).
+  string queue = 5;
+
+  // Timestamp when the event was emitted.
+  //
+  // See: ojs-events.md (time)
+  google.protobuf.Timestamp timestamp = 6;
+
+  // Event-specific data payload. Contents vary by event type.
+  //
+  // Common data fields by event type:
+  //   job.enqueued:    { priority, scheduled_at }
+  //   job.started:     { worker_id, attempt }
+  //   job.completed:   { duration_ms, attempt, result }
+  //   job.failed:      { attempt, error: { code, message, retryable } }
+  //   job.retrying:    { attempt, max_attempts, next_retry_at }
+  //   job.cancelled:   { cancelled_by, reason }
+  //   workflow.*:      { workflow_name, total_steps, ... }
+  //
+  // See: ojs-events.md for complete data schemas per event type
+  google.protobuf.Struct data = 7;
+
+  // ID of the workflow this event relates to (if applicable).
+  //
+  // See: ojs-workflows.md
+  string workflow_id = 8;
+}
+
+// StreamEventsRequest is the request message for the StreamEvents RPC.
+//
+// Opens a server-streaming connection that delivers real-time lifecycle events
+// for monitoring, dashboards, and observability tooling.
+//
+// Filters are combined with AND logic: if multiple filters are specified,
+// only events matching ALL filters are delivered.
+//
+// Conformance level: OPTIONAL (any level).
+//
+// See: ojs-grpc-binding.md Section 6.5 (StreamEvents), Section 10.2 (StreamEvents semantics)
+message StreamEventsRequest {
+  // Optional filter: only receive events for these queues.
+  // Empty means all queues.
+  repeated string queues = 1;
+
+  // Optional filter: only receive these event types.
+  // Empty means all event types.
+  //
+  // Examples: "job.enqueued", "job.completed", "job.failed", "workflow.started".
+  //
+  // See: ojs-grpc-binding.md Section 10.2.2 (Event Types)
+  repeated string event_types = 2;
+
+  // Optional filter: only receive events for this specific job ID.
+  string job_id = 3;
+
+  // Optional filter: only receive events for this specific workflow ID.
+  string workflow_id = 4;
+}
+
+// The StreamEvents response is a stream of Event messages.
+//
+// Events are delivered on a best-effort basis. The server SHOULD buffer events
+// briefly during transient backpressure, but MAY drop events if the client
+// cannot consume them fast enough.
+//
+// The server SHOULD send a heartbeat event (type "stream.keepalive") at least
+// every 30 seconds on an idle stream to detect stale connections.
+//
+// See: ojs-grpc-binding.md Section 10.2 (StreamEvents semantics)
