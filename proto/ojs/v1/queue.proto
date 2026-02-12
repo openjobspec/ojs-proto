@@ -1,0 +1,231 @@
+// Copyright 2026 The Open Job Spec Authors
+// SPDX-License-Identifier: Apache-2.0
+//
+// Queue operation types for the Open Job Spec gRPC protocol binding.
+// See: ojs-grpc-binding.md Section 6.6 (Queue Messages)
+
+syntax = "proto3";
+
+package ojs.v1;
+
+import "google/protobuf/timestamp.proto";
+import "ojs/v1/job.proto";
+
+option go_package = "github.com/openjobspec/ojs-proto/gen/go/ojs/v1;ojsv1";
+option java_multiple_files = true;
+option java_package = "org.openjobspec.ojs.v1";
+
+// ListQueuesRequest is the request message for the ListQueues RPC.
+//
+// Conformance level: 0 (Core).
+//
+// See: ojs-grpc-binding.md Section 6.6 (ListQueues)
+message ListQueuesRequest {
+  // Optional limit on the number of queues to return. Default: 100.
+  int32 limit = 1;
+
+  // Optional cursor for pagination. Obtained from a previous
+  // ListQueuesResponse.next_cursor.
+  string cursor = 2;
+}
+
+// ListQueuesResponse is the response message for the ListQueues RPC.
+//
+// See: ojs-grpc-binding.md Section 6.6 (ListQueuesResponse)
+message ListQueuesResponse {
+  // List of queue summaries.
+  repeated QueueInfo queues = 1;
+
+  // Cursor for the next page, empty if no more results.
+  string next_cursor = 2;
+}
+
+// QueueInfo provides summary information about a queue.
+//
+// See: ojs-grpc-binding.md Section 6.6 (QueueInfo)
+message QueueInfo {
+  // Queue name. Matches pattern [a-z0-9][a-z0-9\-\.]*, max 128 characters.
+  //
+  // See: ojs-core.md Section 5.1 (queue)
+  string name = 1;
+
+  // Whether the queue is currently paused. A paused queue does not deliver
+  // jobs to workers via Fetch or StreamJobs.
+  bool paused = 2;
+
+  // Number of jobs in the available state, ready for pickup by workers.
+  int64 available_count = 3;
+
+  // Timestamp when the queue was created (if tracked by the implementation).
+  google.protobuf.Timestamp created_at = 4;
+}
+
+// QueueStatsRequest is the request message for the QueueStats RPC.
+//
+// Conformance level: 4 (Advanced).
+//
+// See: ojs-grpc-binding.md Section 6.6 (QueueStats)
+message QueueStatsRequest {
+  // Required. Queue name to retrieve statistics for.
+  string queue = 1;
+}
+
+// QueueStatsResponse is the response message for the QueueStats RPC.
+//
+// See: ojs-grpc-binding.md Section 6.6 (QueueStatsResponse)
+message QueueStatsResponse {
+  // Queue name.
+  string queue = 1;
+
+  // Detailed statistics for the queue.
+  QueueStatistics stats = 2;
+}
+
+// QueueStatistics provides detailed operational statistics for a queue.
+//
+// See: ojs-grpc-binding.md Section 6.6 (QueueStatistics)
+message QueueStatistics {
+  // Number of jobs currently in the available state, ready for pickup.
+  //
+  // See: ojs-core.md Section 6.1 (available)
+  int64 available = 1;
+
+  // Number of jobs currently being executed by workers.
+  //
+  // See: ojs-core.md Section 6.1 (active)
+  int64 active = 2;
+
+  // Number of jobs scheduled for future execution.
+  //
+  // See: ojs-core.md Section 6.1 (scheduled)
+  int64 scheduled = 3;
+
+  // Number of jobs in the retryable state, waiting for backoff to expire.
+  //
+  // See: ojs-core.md Section 6.1 (retryable)
+  int64 retryable = 4;
+
+  // Number of jobs in the dead letter (discarded) state.
+  //
+  // See: ojs-core.md Section 6.1 (discarded)
+  int64 dead = 5;
+
+  // Number of jobs completed in the last hour.
+  int64 completed_last_hour = 6;
+
+  // Number of jobs failed in the last hour.
+  int64 failed_last_hour = 7;
+
+  // Average execution duration in milliseconds over the last hour.
+  double avg_duration_ms = 8;
+
+  // Average wait time (enqueued_at to started_at) in milliseconds.
+  double avg_wait_ms = 9;
+
+  // Throughput in jobs per second over the last minute.
+  double throughput_per_second = 10;
+
+  // Whether the queue is currently paused.
+  bool paused = 11;
+}
+
+// PauseQueueRequest is the request message for the PauseQueue RPC.
+//
+// Pauses a queue, preventing workers from fetching new jobs from it.
+// Active jobs in the queue are not affected.
+//
+// Conformance level: 4 (Advanced).
+//
+// See: ojs-grpc-binding.md Section 6.6 (PauseQueue)
+message PauseQueueRequest {
+  // Required. Queue name to pause.
+  string queue = 1;
+}
+
+// PauseQueueResponse is the response message for the PauseQueue RPC.
+message PauseQueueResponse {}
+
+// ResumeQueueRequest is the request message for the ResumeQueue RPC.
+//
+// Resumes a previously paused queue, allowing workers to fetch jobs again.
+//
+// Conformance level: 4 (Advanced).
+//
+// See: ojs-grpc-binding.md Section 6.6 (ResumeQueue)
+message ResumeQueueRequest {
+  // Required. Queue name to resume.
+  string queue = 1;
+}
+
+// ResumeQueueResponse is the response message for the ResumeQueue RPC.
+message ResumeQueueResponse {}
+
+// ListDeadLetterRequest is the request message for the ListDeadLetter RPC.
+//
+// Lists jobs that have been permanently failed (discarded) and moved to
+// the dead letter queue.
+//
+// Conformance level: 1 (Reliable).
+//
+// See: ojs-grpc-binding.md Section 6.7 (ListDeadLetter)
+message ListDeadLetterRequest {
+  // Optional filter by queue name. If empty, lists dead letters from all queues.
+  string queue = 1;
+
+  // Maximum number of dead letter jobs to return. Default: 50.
+  int32 limit = 2;
+
+  // Pagination cursor. Obtained from a previous ListDeadLetterResponse.next_cursor.
+  string cursor = 3;
+}
+
+// ListDeadLetterResponse is the response message for the ListDeadLetter RPC.
+//
+// See: ojs-grpc-binding.md Section 6.7 (ListDeadLetterResponse)
+message ListDeadLetterResponse {
+  // Dead letter jobs.
+  repeated Job jobs = 1;
+
+  // Total count of dead letter jobs matching the filter.
+  int64 total_count = 2;
+
+  // Cursor for the next page, empty if no more results.
+  string next_cursor = 3;
+}
+
+// RetryDeadLetterRequest is the request message for the RetryDeadLetter RPC.
+//
+// Retries a specific dead letter job by re-enqueueing it. The job transitions
+// from discarded to available.
+//
+// Conformance level: 1 (Reliable).
+//
+// See: ojs-core.md Section 6.3 (discarded -> available transition)
+// See: ojs-grpc-binding.md Section 6.7 (RetryDeadLetter)
+message RetryDeadLetterRequest {
+  // Required. The UUIDv7 job identifier to retry.
+  string job_id = 1;
+}
+
+// RetryDeadLetterResponse is the response message for the RetryDeadLetter RPC.
+//
+// See: ojs-grpc-binding.md Section 6.7 (RetryDeadLetterResponse)
+message RetryDeadLetterResponse {
+  // The re-enqueued job with updated state.
+  Job job = 1;
+}
+
+// DeleteDeadLetterRequest is the request message for the DeleteDeadLetter RPC.
+//
+// Permanently deletes a dead letter job from the system.
+//
+// Conformance level: 1 (Reliable).
+//
+// See: ojs-grpc-binding.md Section 6.7 (DeleteDeadLetter)
+message DeleteDeadLetterRequest {
+  // Required. The UUIDv7 job identifier to permanently delete.
+  string job_id = 1;
+}
+
+// DeleteDeadLetterResponse is the response message for the DeleteDeadLetter RPC.
+message DeleteDeadLetterResponse {}
