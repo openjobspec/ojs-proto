@@ -1,0 +1,244 @@
+// Copyright 2026 The Open Job Spec Authors
+// SPDX-License-Identifier: Apache-2.0
+//
+// Worker coordination types for the Open Job Spec gRPC protocol binding.
+// See: ojs-core.md Section 7 (Logical Operations), Section 10 (Worker Lifecycle)
+// See: ojs-grpc-binding.md Section 6.4 (Worker Messages), 6.5 (Streaming Messages)
+// See: ojs-worker-protocol.md
+
+syntax = "proto3";
+
+package ojs.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "ojs/v1/job.proto";
+
+option go_package = "github.com/openjobspec/ojs-proto/gen/go/ojs/v1;ojsv1";
+option java_multiple_files = true;
+option java_package = "org.openjobspec.ojs.v1";
+
+// WorkerState represents the lifecycle state of a worker process.
+//
+// Workers have three lifecycle states. State changes are communicated via
+// the BEAT operation: the server responds to a heartbeat with a directive
+// indicating the desired worker state.
+//
+// See: ojs-core.md Section 10 (Worker Lifecycle)
+// See: ojs-worker-protocol.md
+enum WorkerState {
+  // Default value. MUST NOT be used in valid heartbeat messages.
+  WORKER_STATE_UNSPECIFIED = 0;
+
+  // Normal operation. The worker fetches and executes jobs.
+  WORKER_STATE_RUNNING = 1;
+
+  // The worker stops fetching new jobs but continues executing jobs already
+  // claimed. This state is used during graceful deployment: new code is
+  // deployed while existing jobs finish.
+  WORKER_STATE_QUIET = 2;
+
+  // The worker stops fetching new jobs and shuts down after currently active
+  // jobs complete, or after a configurable grace period (whichever comes first).
+  // Jobs that do not complete within the grace period are returned to the queue
+  // via visibility timeout.
+  WORKER_STATE_TERMINATE = 3;
+}
+
+// FetchRequest is the request message for the Fetch RPC.
+//
+// Maps to the FETCH logical operation defined in ojs-core.md Section 7.2.
+// The implementation MUST select the highest-priority available job from
+// the specified queues.
+//
+// Conformance level: 0 (Core).
+//
+// See: ojs-grpc-binding.md Section 6.4 (Fetch)
+message FetchRequest {
+  // Required. One or more queue names to fetch from, in priority order.
+  // The server SHOULD check queues in the order specified (left-to-right
+  // priority) and return jobs from the first non-empty queue.
+  //
+  // See: ojs-core.md Section 7.2 (queue ordering)
+  repeated string queues = 1;
+
+  // Maximum number of jobs to return. Default: 1.
+  // Implementations MAY support fetching multiple jobs in a single operation.
+  //
+  // See: ojs-core.md Section 7.2 (Multi-fetch)
+  int32 count = 2;
+
+  // Worker identifier for tracking and observability.
+  //
+  // See: ojs-worker-protocol.md (worker_id)
+  string worker_id = 3;
+}
+
+// FetchResponse is the response message for the Fetch RPC.
+//
+// See: ojs-grpc-binding.md Section 6.4 (FetchResponse)
+message FetchResponse {
+  // Jobs assigned to this worker. May be empty if no jobs are available.
+  // Each returned job has transitioned to the active state atomically.
+  //
+  // See: ojs-core.md Section 7.2 (FETCH behavior)
+  repeated Job jobs = 1;
+}
+
+// AckRequest is the request message for the Ack RPC.
+//
+// Maps to the ACK logical operation defined in ojs-core.md Section 7.3.
+// Acknowledges successful completion of a job.
+//
+// Conformance level: 0 (Core).
+//
+// See: ojs-grpc-binding.md Section 6.4 (Ack)
+message AckRequest {
+  // Required. The UUIDv7 job identifier being acknowledged.
+  // The job MUST be in the active state.
+  //
+  // See: ojs-core.md Section 7.3 (Preconditions)
+  string job_id = 1;
+
+  // Optional result data from the handler. Stored in the job's result attribute.
+  //
+  // See: ojs-core.md Section 5.3 (result)
+  google.protobuf.Struct result = 2;
+}
+
+// AckResponse is the response message for the Ack RPC.
+//
+// See: ojs-grpc-binding.md Section 6.4 (AckResponse)
+message AckResponse {
+  // Confirmation of acknowledgment.
+  bool acknowledged = 1;
+}
+
+// NackRequest is the request message for the Nack RPC.
+//
+// Maps to the FAIL logical operation defined in ojs-core.md Section 7.4.
+// Reports that a job execution failed.
+//
+// Conformance level: 0 (Core).
+//
+// See: ojs-grpc-binding.md Section 6.4 (Nack)
+message NackRequest {
+  // Required. The UUIDv7 job identifier being reported as failed.
+  // The job MUST be in the active state.
+  //
+  // See: ojs-core.md Section 7.4 (Preconditions)
+  string job_id = 1;
+
+  // Required. Structured error information from the handler.
+  //
+  // See: ojs-core.md Section 8 (Error Reporting)
+  JobError error = 2;
+}
+
+// NackResponse is the response message for the Nack RPC.
+//
+// The server evaluates the retry policy and returns the resulting state.
+//
+// See: ojs-grpc-binding.md Section 6.4 (NackResponse)
+message NackResponse {
+  // The new state of the job after failure processing.
+  // Either JOB_STATE_RETRYABLE (retries remain) or JOB_STATE_DISCARDED
+  // (retries exhausted or non-retryable error).
+  //
+  // See: ojs-core.md Section 7.4 (FAIL behavior)
+  JobState state = 1;
+
+  // If the job will be retried, the scheduled time for the next attempt.
+  // Only set when state is JOB_STATE_RETRYABLE.
+  //
+  // See: ojs-retry.md (backoff calculation)
+  google.protobuf.Timestamp next_attempt_at = 2;
+}
+
+// HeartbeatRequest is the request message for the Heartbeat RPC.
+//
+// Maps to the BEAT logical operation defined in ojs-core.md Section 7.5.
+// The worker reports that it is alive and receives directives from the server.
+//
+// Conformance level: 1 (Reliable).
+//
+// See: ojs-grpc-binding.md Section 6.4 (Heartbeat)
+// See: ojs-worker-protocol.md (Heartbeat)
+message HeartbeatRequest {
+  // Required. The UUIDv7 job identifier (for per-job heartbeat)
+  // or worker identifier (for worker-level heartbeat).
+  string id = 1;
+
+  // Worker identifier. MUST be provided for worker-level heartbeats.
+  //
+  // See: ojs-worker-protocol.md (worker_id)
+  string worker_id = 2;
+
+  // Optional: extend the visibility timeout by this duration.
+  //
+  // See: ojs-core.md Section 6.4 (Visibility timeout)
+  google.protobuf.Duration extend_by = 3;
+
+  // Current worker state reported to the server.
+  //
+  // See: ojs-core.md Section 10 (Worker Lifecycle)
+  WorkerState current_state = 4;
+}
+
+// HeartbeatResponse is the response message for the Heartbeat RPC.
+//
+// The server MAY respond with a directive to change the worker's lifecycle state.
+//
+// See: ojs-grpc-binding.md Section 6.4 (HeartbeatResponse)
+message HeartbeatResponse {
+  // Server-directed worker state. The worker SHOULD transition to this
+  // state upon receiving the response. This enables the server to
+  // signal "quiet" (stop fetching) or "terminate" (shut down) to workers.
+  //
+  // See: ojs-core.md Section 7.5 (BEAT directives)
+  WorkerState directed_state = 1;
+
+  // New visibility timeout deadline after extension.
+  google.protobuf.Timestamp new_deadline = 2;
+}
+
+// StreamJobsRequest is the request message for the StreamJobs RPC.
+//
+// Opens a server-streaming connection that pushes jobs to the worker as they
+// become available. High-throughput alternative to polling via Fetch.
+//
+// Conformance level: OPTIONAL (any level).
+//
+// See: ojs-grpc-binding.md Section 6.5 (StreamJobs), Section 10.1 (StreamJobs semantics)
+message StreamJobsRequest {
+  // Required. One or more queue names to subscribe to.
+  //
+  // See: ojs-core.md Section 7.2 (queue ordering)
+  repeated string queues = 1;
+
+  // Worker identifier. MUST be provided so the server can track stream
+  // assignments and handle disconnects.
+  //
+  // Without a worker identifier, the server cannot reclaim jobs that were
+  // streamed to a worker that disconnected without acknowledging them.
+  //
+  // See: ojs-worker-protocol.md (worker_id)
+  string worker_id = 2;
+
+  // Maximum number of concurrent unacknowledged jobs this worker accepts.
+  // The server MUST NOT send more jobs than this limit allows.
+  // Default: 1.
+  //
+  // Backpressure is essential to prevent overwhelming workers. Without a
+  // concurrency limit, a fast producer could flood a slow consumer.
+  //
+  // See: ojs-grpc-binding.md Section 10.1.1 (Connection Lifecycle)
+  int32 max_concurrent = 3;
+}
+
+// The StreamJobs response is a stream of Job messages. Each Job sent on the
+// stream represents a job assigned to the worker. The worker MUST Ack or Nack
+// each received job via separate unary RPCs.
+//
+// See: ojs-grpc-binding.md Section 10.1 (StreamJobs semantics)
