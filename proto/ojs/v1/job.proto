@@ -1,0 +1,565 @@
+// Copyright 2026 The Open Job Spec Authors
+// SPDX-License-Identifier: Apache-2.0
+//
+// Job message types for the Open Job Spec gRPC protocol binding.
+// See: ojs-core.md Section 5 (Job Envelope)
+// See: ojs-grpc-binding.md Section 6.1 (Common Types), 6.3 (Job Messages)
+
+syntax = "proto3";
+
+package ojs.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/openjobspec/ojs-proto/gen/go/ojs/v1;ojsv1";
+option java_multiple_files = true;
+option java_package = "org.openjobspec.ojs.v1";
+
+// Job represents the canonical OJS job envelope.
+//
+// The job envelope is the core data structure of the Open Job Spec. It contains
+// all attributes necessary to identify, configure, route, execute, and track a
+// background job.
+//
+// See: ojs-core.md Section 5 (Job Envelope)
+// See: ojs-grpc-binding.md Section 6.1 (Common Types)
+message Job {
+  // Globally unique job identifier. MUST be a UUIDv7 string formatted as
+  // lowercase hexadecimal with hyphens (e.g., "019461a8-1a2b-7c3d-8e4f-5a6b7c8d9e0f").
+  //
+  // UUIDv7 is time-ordered and sortable, which enables efficient database indexing,
+  // chronological job listing, and distributed generation without coordination.
+  //
+  // See: ojs-core.md Section 5.1 (id)
+  string id = 1;
+
+  // Dot-namespaced job type used to route the job to the appropriate handler
+  // (e.g., "email.send", "report.generate", "data.etl.transform").
+  //
+  // Each segment MUST match the pattern [a-z][a-z0-9_]* (lowercase alphanumeric
+  // with underscores, starting with a letter).
+  //
+  // See: ojs-core.md Section 5.1 (type)
+  string type = 2;
+
+  // The queue this job belongs to. Defaults to "default" if not specified
+  // at enqueue time. Queue names MUST match [a-z0-9][a-z0-9\-\.]* and be
+  // at most 128 characters.
+  //
+  // See: ojs-core.md Section 5.1 (queue)
+  string queue = 3;
+
+  // Positional arguments for the job handler. Uses google.protobuf.Value
+  // to maintain JSON-compatible type semantics (string, number, bool,
+  // null, list, struct).
+  //
+  // Arguments MUST use JSON-native types only. Language-specific serialization
+  // formats (e.g., Python pickle, Ruby Marshal) MUST NOT be used.
+  //
+  // See: ojs-core.md Section 5.1 (args)
+  repeated google.protobuf.Value args = 4;
+
+  // Extensible key-value metadata for cross-cutting concerns such as
+  // trace context propagation, locale, user identity, tenant ID, and
+  // other infrastructure concerns.
+  //
+  // Well-known keys: trace_id, span_id, locale, user_id, tenant_id,
+  // correlation_id, tags.
+  //
+  // See: ojs-core.md Section 5.2 (meta)
+  google.protobuf.Struct meta = 5;
+
+  // Current lifecycle state of the job. Set and maintained by the implementation.
+  // Clients MUST NOT set this directly.
+  //
+  // See: ojs-core.md Section 5.3 (state), Section 6 (Job Lifecycle State Machine)
+  JobState state = 6;
+
+  // Job priority within the queue. Higher values indicate higher priority.
+  // Default: 0 (NORMAL). Named levels: HIGH=10, NORMAL=0, LOW=-10.
+  //
+  // See: ojs-core.md Section 5.2 (priority)
+  int32 priority = 7;
+
+  // Current attempt number (1-indexed once execution begins). A job that
+  // has never been executed has attempt 0. Incremented each time the job
+  // transitions to active.
+  //
+  // See: ojs-core.md Section 5.3 (attempt)
+  int32 attempt = 8;
+
+  // Maximum number of attempts before the job is discarded.
+  // 0 means use the retry policy's max_attempts.
+  //
+  // See: ojs-core.md Section 5.2 (retry)
+  int32 max_attempts = 9;
+
+  // Retry policy governing backoff behavior on failure.
+  //
+  // See: ojs-retry.md for full specification
+  RetryPolicy retry_policy = 10;
+
+  // Optional unique job policy for deduplication.
+  //
+  // See: ojs-unique-jobs.md for full specification
+  UniquePolicy unique_policy = 11;
+
+  // Optional result data set by the handler on successful completion.
+  // MUST be a JSON-native value.
+  //
+  // See: ojs-core.md Section 5.3 (result)
+  google.protobuf.Struct result = 12;
+
+  // Ordered list of errors from each failed attempt. The last element
+  // represents the most recent error.
+  //
+  // See: ojs-core.md Section 5.3 (error), Section 8 (Error Reporting)
+  repeated JobError errors = 13;
+
+  // Timestamp when the job was created (received by the backend).
+  // System-managed: set by implementation on PUSH.
+  //
+  // See: ojs-core.md Section 5.3 (created_at)
+  google.protobuf.Timestamp created_at = 14;
+
+  // Timestamp when the job entered the available state (became ready for
+  // execution). For immediately available jobs, this equals created_at.
+  // For scheduled jobs, this is set when the job transitions from
+  // scheduled to available.
+  //
+  // See: ojs-core.md Section 5.3 (enqueued_at)
+  google.protobuf.Timestamp enqueued_at = 15;
+
+  // Timestamp when the job is scheduled to become available. Only set for
+  // delayed/scheduled jobs. If set to a future time, the job enters the
+  // scheduled state instead of available.
+  //
+  // See: ojs-core.md Section 5.2 (scheduled_at)
+  google.protobuf.Timestamp scheduled_at = 16;
+
+  // Timestamp when a worker most recently began executing the job.
+  // Updated on each attempt.
+  //
+  // See: ojs-core.md Section 5.3 (started_at)
+  google.protobuf.Timestamp started_at = 17;
+
+  // Timestamp when the job reached a terminal state (completed, cancelled,
+  // or discarded).
+  //
+  // See: ojs-core.md Section 5.3 (completed_at)
+  google.protobuf.Timestamp completed_at = 18;
+
+  // Timestamp after which the job should be discarded if not yet started.
+  // If the current time is past expires_at when the job would be fetched,
+  // the implementation MUST transition the job to discarded.
+  //
+  // See: ojs-core.md Section 5.2 (expires_at)
+  google.protobuf.Timestamp expires_at = 19;
+
+  // Maximum execution time for a single attempt.
+  // Default: implementation-defined, SHOULD be 1800s (30 minutes).
+  //
+  // See: ojs-core.md Section 5.2 (timeout)
+  google.protobuf.Duration timeout = 20;
+
+  // Visibility timeout / reservation period. When a job is fetched, it is
+  // reserved for this duration. If not acknowledged within this window,
+  // the job is automatically requeued.
+  //
+  // See: ojs-core.md Section 6.4 (Visibility timeout)
+  google.protobuf.Duration visibility_timeout = 21;
+
+  // Optional tags for filtering and observability.
+  //
+  // See: ojs-core.md Section 5.2 (meta.tags)
+  repeated string tags = 22;
+
+  // Optional distributed trace identifier (W3C Trace Context or custom).
+  //
+  // See: ojs-core.md Section 5.2 (meta.trace_id)
+  string trace_id = 23;
+
+  // Optional workflow reference, set if this job is part of a workflow.
+  //
+  // See: ojs-workflows.md
+  string workflow_id = 24;
+}
+
+// JobState enumerates the lifecycle states defined in the OJS Core Specification.
+//
+// The lifecycle defines exactly eight states. Implementations MUST enforce the
+// state machine; an attempt to perform an invalid state transition MUST be rejected.
+//
+// See: ojs-core.md Section 6.1 (States)
+enum JobState {
+  // Default value. MUST NOT be used in valid job envelopes.
+  JOB_STATE_UNSPECIFIED = 0;
+
+  // The job has a future scheduled_at time and is waiting for that time to arrive.
+  // The implementation transitions the job to available when the time arrives.
+  JOB_STATE_SCHEDULED = 1;
+
+  // The job is ready for pickup by a worker. It is in a queue and can be fetched.
+  JOB_STATE_AVAILABLE = 2;
+
+  // The job is staged and awaiting external activation. It will not be made
+  // available to workers until explicitly activated.
+  JOB_STATE_PENDING = 3;
+
+  // The job has been claimed by a worker and is currently being executed.
+  JOB_STATE_ACTIVE = 4;
+
+  // The job handler executed successfully. This is a terminal state.
+  JOB_STATE_COMPLETED = 5;
+
+  // The job handler failed, but the job has remaining retry attempts and will
+  // be retried after a backoff delay.
+  JOB_STATE_RETRYABLE = 6;
+
+  // The job was intentionally stopped via a CANCEL operation. Terminal state in v1.0.
+  JOB_STATE_CANCELLED = 7;
+
+  // The job permanently failed (retry attempts exhausted) or was manually discarded.
+  // The job is in the dead letter queue. This is a terminal state.
+  JOB_STATE_DISCARDED = 8;
+}
+
+// RetryPolicy defines backoff behavior on job failure.
+//
+// Adopts Temporal's structured retry policy format with the addition of
+// jitter support.
+//
+// See: ojs-retry.md for full specification
+// See: ojs-core.md Section 5.2 (retry)
+message RetryPolicy {
+  // Total number of attempts including the initial execution.
+  // 0 means unlimited retries. Default: 3.
+  //
+  // See: ojs-retry.md (max_attempts)
+  int32 max_attempts = 1;
+
+  // Delay before the first retry attempt.
+  // Default: 1 second.
+  //
+  // See: ojs-retry.md (initial_interval)
+  google.protobuf.Duration initial_interval = 2;
+
+  // Multiplier applied to the interval after each retry.
+  // MUST be >= 1.0. Default: 2.0.
+  //
+  // See: ojs-retry.md (backoff_coefficient)
+  double backoff_coefficient = 3;
+
+  // Maximum delay between retry attempts (cap on exponential growth).
+  // MUST be >= initial_interval. Default: 5 minutes.
+  //
+  // See: ojs-retry.md (max_interval)
+  google.protobuf.Duration max_interval = 4;
+
+  // Whether to add random jitter to retry delays to prevent thundering herd.
+  // Default: true.
+  //
+  // See: ojs-retry.md (jitter)
+  bool jitter = 5;
+
+  // Error types that MUST NOT trigger a retry. If a handler returns an error
+  // whose type matches any string in this list, the job transitions directly
+  // to discarded.
+  //
+  // See: ojs-retry.md (non_retryable_errors)
+  repeated string non_retryable_errors = 6;
+}
+
+// UniquePolicy defines deduplication constraints for a job.
+//
+// Uniqueness dimensions control how the uniqueness key is computed. When a
+// duplicate is detected, the on_conflict strategy determines behavior.
+//
+// See: ojs-unique-jobs.md for full specification
+// See: ojs-core.md Section 5.2 (unique)
+message UniquePolicy {
+  // Fields used to compute the uniqueness key.
+  // Valid values: "type", "queue", "args", "meta".
+  //
+  // See: ojs-unique-jobs.md (keys)
+  repeated string key = 1;
+
+  // Time window during which the uniqueness constraint is enforced.
+  // If not set, uniqueness is enforced indefinitely.
+  //
+  // See: ojs-unique-jobs.md (period)
+  google.protobuf.Duration period = 2;
+
+  // Behavior when a duplicate is detected.
+  //
+  // See: ojs-unique-jobs.md (on_conflict)
+  UniqueConflictAction on_conflict = 3;
+
+  // States to consider when checking for duplicates.
+  // Default: [AVAILABLE, ACTIVE, SCHEDULED, RETRYABLE, PENDING].
+  //
+  // See: ojs-unique-jobs.md (states)
+  repeated JobState states = 4;
+}
+
+// UniqueConflictAction defines what happens when a duplicate job is detected.
+//
+// See: ojs-unique-jobs.md (on_conflict)
+enum UniqueConflictAction {
+  // Default value. MUST NOT be used; treat as REJECT.
+  UNIQUE_CONFLICT_ACTION_UNSPECIFIED = 0;
+
+  // Reject the new job. The enqueue operation returns an error.
+  UNIQUE_CONFLICT_ACTION_REJECT = 1;
+
+  // Replace the existing job with the new one.
+  UNIQUE_CONFLICT_ACTION_REPLACE = 2;
+
+  // Silently ignore the new job. The enqueue operation succeeds but
+  // the existing job is unchanged.
+  UNIQUE_CONFLICT_ACTION_IGNORE = 3;
+}
+
+// JobError captures structured error information from a failed attempt.
+//
+// When a job fails, the error MUST be reported as a structured object.
+// This enables debugging across language boundaries, automated classification
+// of failures, and meaningful error display in dashboards.
+//
+// See: ojs-core.md Section 8 (Error Reporting)
+// See: ojs-grpc-binding.md Section 6.1 (JobError)
+message JobError {
+  // Machine-readable error type/class name.
+  // This SHOULD be the language-specific exception class name
+  // (e.g., "RuntimeError", "NullPointerException") or a domain-specific
+  // error code (e.g., "SmtpConnectionRefused").
+  //
+  // See: ojs-core.md Section 8.1 (type)
+  string code = 1;
+
+  // Human-readable error description. This SHOULD be the exception message
+  // or a descriptive string.
+  //
+  // See: ojs-core.md Section 8.1 (message)
+  string message = 2;
+
+  // Whether this error is considered retryable. Used in conjunction with
+  // the retry policy's non_retryable_errors list.
+  bool retryable = 3;
+
+  // Attempt number when this error occurred (1-indexed).
+  //
+  // See: ojs-core.md Section 5.3 (attempt)
+  int32 attempt = 4;
+
+  // Timestamp when the error occurred.
+  google.protobuf.Timestamp occurred_at = 5;
+
+  // Optional stack trace or backtrace for debugging. Implementations
+  // SHOULD limit to at most 50 frames and 10,000 total characters.
+  //
+  // See: ojs-core.md Section 8.1 (backtrace)
+  string backtrace = 6;
+
+  // Optional structured details about the error for programmatic use.
+  google.protobuf.Struct details = 7;
+}
+
+// EnqueueOptions specifies optional configuration for job enqueueing.
+//
+// These options control queue routing, scheduling, retry behavior,
+// deduplication, and other job attributes at enqueue time.
+//
+// See: ojs-grpc-binding.md Section 6.3 (EnqueueOptions)
+message EnqueueOptions {
+  // Target queue. Default: "default".
+  //
+  // See: ojs-core.md Section 5.1 (queue)
+  string queue = 1;
+
+  // Job priority. Higher values = higher priority. Default: 0.
+  // Named levels: HIGH=10, NORMAL=0, LOW=-10.
+  //
+  // See: ojs-core.md Section 5.2 (priority)
+  int32 priority = 2;
+
+  // Schedule the job for future execution. If set to a future time,
+  // the job enters the scheduled state.
+  //
+  // See: ojs-core.md Section 5.2 (scheduled_at)
+  google.protobuf.Timestamp delay_until = 3;
+
+  // Maximum execution time per attempt.
+  // Default: implementation-defined, SHOULD be 1800s (30 minutes).
+  //
+  // See: ojs-core.md Section 5.2 (timeout)
+  google.protobuf.Duration timeout = 4;
+
+  // Retry policy override for this job.
+  //
+  // See: ojs-retry.md for full specification
+  RetryPolicy retry = 5;
+
+  // Unique job policy for deduplication.
+  //
+  // See: ojs-unique-jobs.md for full specification
+  UniquePolicy unique = 6;
+
+  // Time-to-live: discard the job if not started within this duration.
+  // Converted to an absolute expires_at timestamp by the server.
+  //
+  // See: ojs-core.md Section 5.2 (expires_at)
+  google.protobuf.Duration ttl = 7;
+
+  // Tags for filtering and observability.
+  repeated string tags = 8;
+
+  // Distributed trace identifier for trace context propagation.
+  //
+  // See: ojs-core.md Section 5.2 (meta.trace_id)
+  string trace_id = 9;
+
+  // Extensible metadata for cross-cutting concerns.
+  //
+  // See: ojs-core.md Section 5.2 (meta)
+  google.protobuf.Struct meta = 10;
+
+  // Maximum attempts (shorthand). Overridden by retry.max_attempts if both set.
+  //
+  // See: ojs-retry.md (max_attempts)
+  int32 max_attempts = 11;
+
+  // Visibility timeout / reservation period for workers.
+  //
+  // See: ojs-core.md Section 6.4 (Visibility timeout)
+  google.protobuf.Duration visibility_timeout = 12;
+}
+
+// EnqueueRequest is the request message for the Enqueue RPC.
+//
+// Maps to the PUSH logical operation defined in ojs-core.md Section 7.1.
+//
+// See: ojs-grpc-binding.md Section 6.3 (Enqueue)
+message EnqueueRequest {
+  // Required. Dot-namespaced job type (e.g., "email.send").
+  //
+  // See: ojs-core.md Section 5.1 (type)
+  string type = 1;
+
+  // Required. Positional arguments for the job handler.
+  // Each element MUST be a JSON-native type.
+  //
+  // See: ojs-core.md Section 5.1 (args)
+  repeated google.protobuf.Value args = 2;
+
+  // Optional enqueue options controlling queue, priority, scheduling, etc.
+  EnqueueOptions options = 3;
+}
+
+// EnqueueResponse is the response message for the Enqueue RPC.
+//
+// Returns the complete job envelope with all server-assigned fields populated.
+//
+// See: ojs-grpc-binding.md Section 6.3 (EnqueueResponse)
+message EnqueueResponse {
+  // The enqueued job with server-assigned fields populated (id, state,
+  // created_at, enqueued_at, etc.).
+  Job job = 1;
+}
+
+// EnqueueBatchRequest is the request message for the EnqueueBatch RPC.
+//
+// Maps to the batch variant of the PUSH logical operation.
+// Either all jobs in the batch MUST be enqueued or none (atomic).
+//
+// See: ojs-core.md Section 7.1 (Batch variant)
+// See: ojs-grpc-binding.md Section 6.3 (EnqueueBatch)
+message EnqueueBatchRequest {
+  // Jobs to enqueue. Each entry specifies type, args, and optional per-job options.
+  repeated BatchJobEntry jobs = 1;
+
+  // Default options applied to all jobs in the batch. Per-job options
+  // override these defaults.
+  EnqueueOptions default_options = 2;
+}
+
+// BatchJobEntry represents a single job in a batch enqueue operation.
+//
+// See: ojs-grpc-binding.md Section 6.3 (BatchJobEntry)
+message BatchJobEntry {
+  // Required. Dot-namespaced job type.
+  string type = 1;
+
+  // Required. Positional arguments for the job handler.
+  repeated google.protobuf.Value args = 2;
+
+  // Optional per-job options that override batch defaults.
+  EnqueueOptions options = 3;
+}
+
+// EnqueueBatchResponse is the response message for the EnqueueBatch RPC.
+//
+// See: ojs-grpc-binding.md Section 6.3 (EnqueueBatchResponse)
+message EnqueueBatchResponse {
+  // The enqueued jobs in the same order as the request.
+  repeated Job jobs = 1;
+
+  // Number of jobs successfully enqueued.
+  int32 count = 2;
+
+  // Per-job errors for partial failures. The key is the 0-based index
+  // into the request's jobs list.
+  map<int32, BatchJobError> errors = 3;
+}
+
+// BatchJobError captures an error for a single job in a batch operation.
+//
+// See: ojs-grpc-binding.md Section 6.3 (BatchJobError)
+message BatchJobError {
+  // Error code (e.g., "invalid_payload", "duplicate").
+  string code = 1;
+
+  // Human-readable error message.
+  string message = 2;
+}
+
+// GetJobRequest is the request message for the GetJob RPC.
+//
+// Maps to the INFO logical operation defined in ojs-core.md Section 7.7.
+//
+// See: ojs-grpc-binding.md Section 6.3 (GetJob)
+message GetJobRequest {
+  // Required. The UUIDv7 job identifier.
+  string job_id = 1;
+}
+
+// GetJobResponse is the response message for the GetJob RPC.
+//
+// See: ojs-grpc-binding.md Section 6.3 (GetJobResponse)
+message GetJobResponse {
+  // The job, or empty if not found (in which case the RPC returns NOT_FOUND).
+  Job job = 1;
+}
+
+// CancelJobRequest is the request message for the CancelJob RPC.
+//
+// Maps to the CANCEL logical operation defined in ojs-core.md Section 7.6.
+//
+// See: ojs-grpc-binding.md Section 6.3 (CancelJob)
+message CancelJobRequest {
+  // Required. The UUIDv7 job identifier.
+  string job_id = 1;
+
+  // Optional reason for cancellation (stored in job metadata).
+  string reason = 2;
+}
+
+// CancelJobResponse is the response message for the CancelJob RPC.
+//
+// See: ojs-grpc-binding.md Section 6.3 (CancelJobResponse)
+message CancelJobResponse {
+  // The job after cancellation, with state set to CANCELLED.
+  Job job = 1;
+}
