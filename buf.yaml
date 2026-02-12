@@ -1,0 +1,15 @@
+# buf.yaml - Buf configuration for Open Job Spec Protocol Buffers
+# See: https://buf.build/docs/configuration/v2/buf-yaml
+version: v2
+modules:
+  - path: proto
+    name: buf.build/openjobspec/ojs
+lint:
+  use:
+    - STANDARD
+  except:
+    # Allow multi-word package components (ojs.v1 is fine).
+    - PACKAGE_DIRECTORY_MATCH
+breaking:
+  use:
+    - FILE
