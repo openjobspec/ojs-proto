@@ -185,6 +185,12 @@ message Job {
   //
   // See: ojs-workflows.md
   string workflow_id = 24;
+
+  // The version of the OJS Core Specification that the job envelope conforms to.
+  // MUST be a valid Semantic Versioning 2.0.0 string (e.g., "1.0.0-rc.1").
+  //
+  // See: ojs-core.md Section 5.1 (specversion)
+  string specversion = 25;
 }
 
 // JobState enumerates the lifecycle states defined in the OJS Core Specification.
