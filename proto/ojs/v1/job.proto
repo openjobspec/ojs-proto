@@ -276,6 +276,12 @@ message RetryPolicy {
   //
   // See: ojs-retry.md (non_retryable_errors)
   repeated string non_retryable_errors = 6;
+
+  // Action when all attempts are exhausted or a non-retryable error is
+  // encountered. Valid values: "discard" (default), "dead_letter".
+  //
+  // See: ojs-retry.md (on_exhaustion)
+  string on_exhaustion = 7;
 }
 
 // UniquePolicy defines deduplication constraints for a job.
