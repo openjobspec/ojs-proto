@@ -314,6 +314,18 @@ message UniquePolicy {
   //
   // See: ojs-unique-jobs.md (states)
   repeated JobState states = 4;
+
+  // When "args" is in keys, specifies which top-level keys within args to
+  // include in the fingerprint. If empty, all of args is included.
+  //
+  // See: ojs-unique-jobs.md (args_keys)
+  repeated string args_keys = 5;
+
+  // When "meta" is in keys, specifies which top-level keys within meta to
+  // include in the fingerprint. MUST be provided when "meta" is in keys.
+  //
+  // See: ojs-unique-jobs.md (meta_keys)
+  repeated string meta_keys = 6;
 }
 
 // UniqueConflictAction defines what happens when a duplicate job is detected.
@@ -332,6 +344,10 @@ enum UniqueConflictAction {
   // Silently ignore the new job. The enqueue operation succeeds but
   // the existing job is unchanged.
   UNIQUE_CONFLICT_ACTION_IGNORE = 3;
+
+  // Replace the existing job with the new one, except preserve the
+  // existing job's scheduled_at time.
+  UNIQUE_CONFLICT_ACTION_REPLACE_EXCEPT_SCHEDULE = 4;
 }
 
 // JobError captures structured error information from a failed attempt.
