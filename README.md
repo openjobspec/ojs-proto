@@ -1,5 +1,7 @@
 # ojs-proto
 
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 Protocol Buffer definitions for the [Open Job Spec](https://openjobspec.org) (OJS) gRPC protocol binding.
 
 This repository contains the canonical `.proto` files that define the `ojs.v1` gRPC service and message types. These definitions are the machine-readable counterpart to the [OJS gRPC Binding Specification](../spec/spec/ojs-grpc-binding.md).
