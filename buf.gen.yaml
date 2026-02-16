@@ -6,6 +6,10 @@ managed:
   override:
     - file_option: go_package_prefix
       value: github.com/openjobspec/ojs-proto/gen/go
+    - file_option: java_package_prefix
+      value: org.openjobspec.proto
+    - file_option: java_multiple_files
+      value: true
 plugins:
   # Go code generation
   - remote: buf.build/protocolbuffers/go
@@ -21,6 +25,40 @@ plugins:
   - remote: buf.build/connectrpc/es
     out: generated/ts
     opt: target=ts
+
+  # Java code generation
+  - remote: buf.build/protocolbuffers/java
+    out: generated/java
+
+  # Java gRPC code generation
+  - remote: buf.build/grpc/java
+    out: generated/java
+
+  # Python code generation
+  - remote: buf.build/protocolbuffers/python
+    out: generated/python
+
+  # Python gRPC code generation
+  - remote: buf.build/grpc/python
+    out: generated/python
+
+  # Ruby code generation
+  - remote: buf.build/protocolbuffers/ruby
+    out: generated/ruby
+
+  # Ruby gRPC code generation
+  - remote: buf.build/grpc/ruby
+    out: generated/ruby
+
+  # Rust code generation (prost)
+  - local: protoc-gen-prost
+    out: generated/rust
+    opt:
+      - compile_well_known_types
+
+  # Rust gRPC code generation (tonic)
+  - local: protoc-gen-tonic
+    out: generated/rust
 
 inputs:
   - directory: proto
