@@ -1,0 +1,384 @@
+syntax = "proto3";
+
+package ojs.v1;
+
+option go_package = "github.com/openjobspec/ojs-proto/gen/go/ojs/v1;ojsv1";
+
+// MLResourceRequirements defines compute resource requirements for ML/AI jobs.
+// All fields are optional. Backends that do not support ML resource matching
+// MUST ignore these fields.
+message MLResourceRequirements {
+  // Required accelerator type.
+  AcceleratorType accelerator = 1;
+
+  // GPU resource requirements.
+  GPURequirements gpu = 2;
+
+  // TPU resource requirements.
+  TPURequirements tpu = 3;
+
+  // Minimum CPU cores.
+  int32 cpu_cores = 4;
+
+  // Minimum system (host) memory in GB.
+  float memory_gb = 5;
+
+  // Minimum scratch storage in GB.
+  float storage_gb = 6;
+
+  // Minimum shared memory (/dev/shm) size in GB.
+  float shm_size_gb = 7;
+}
+
+// GPURequirements declares GPU resource needs for a job.
+message GPURequirements {
+  // GPU model identifier (e.g., "nvidia-a100", "nvidia-h100").
+  string type = 1;
+
+  // Number of GPUs required (default: 1 when any GPU attribute is set).
+  int32 count = 2;
+
+  // Minimum GPU VRAM per device in GB.
+  float memory_gb = 3;
+
+  // Minimum NVIDIA compute capability (e.g., "8.0", "9.0").
+  string compute_capability = 4;
+
+  // Required GPU interconnect type.
+  GPUInterconnect interconnect = 5;
+}
+
+// TPURequirements declares TPU resource needs for a job.
+message TPURequirements {
+  // TPU version identifier.
+  TPUType type = 1;
+
+  // TPU pod slice topology shape (e.g., "2x4", "4x4").
+  string topology = 2;
+
+  // Number of TPU chips required.
+  int32 chip_count = 3;
+}
+
+// MLModelInfo identifies the model for an ML job.
+message MLModelInfo {
+  // Model identifier (e.g., "llama-3.1-70b").
+  string model_id = 1;
+
+  // Specific model version or tag.
+  string model_version = 2;
+
+  // Model provider.
+  ModelProvider provider = 3;
+
+  // Integrity checksum (e.g., "sha256:abc123").
+  string checksum = 4;
+
+  // Model serialization format.
+  ModelFormat format = 5;
+}
+
+// MLComputeConstraints defines compute limits and configuration for ML jobs.
+message MLComputeConstraints {
+  // Maximum tokens for generation tasks.
+  int32 max_tokens = 1;
+
+  // Maximum batch size for inference.
+  int32 max_batch_size = 2;
+
+  // ML-specific timeout in seconds (overrides standard job timeout).
+  int32 timeout_seconds = 3;
+
+  // Resource priority class.
+  PriorityClass priority_class = 4;
+
+  // ML runtime or framework required.
+  MLRuntime runtime = 5;
+
+  // Numerical precision for computation.
+  Precision precision = 6;
+
+  // Parallelism strategy for multi-device execution.
+  DistributedStrategy distributed_strategy = 7;
+}
+
+// CheckpointConfig declares checkpoint behavior for long-running ML jobs.
+message CheckpointConfig {
+  // Whether periodic checkpointing is enabled.
+  bool enabled = 1;
+
+  // Checkpoint interval in seconds.
+  int32 interval_seconds = 2;
+
+  // URI prefix for checkpoint storage (e.g., "s3://bucket/checkpoints/").
+  string storage_uri = 3;
+
+  // Maximum checkpoints to retain (FIFO eviction).
+  int32 max_checkpoints = 4;
+}
+
+// PreemptionPolicy declares a job's tolerance for being preempted.
+message PreemptionPolicy {
+  // Whether this job can be preempted by higher-priority jobs.
+  bool preemptible = 1;
+
+  // Seconds of warning before forcible preemption.
+  int32 grace_period_seconds = 2;
+
+  // Whether to save a checkpoint during the preemption grace period.
+  bool checkpoint_on_preempt = 3;
+}
+
+// NodeSelector defines key-value labels that a worker node MUST match.
+message NodeSelector {
+  // Label key-value pairs. All must match (AND semantics).
+  map<string, string> labels = 1;
+}
+
+// AffinityRule defines a single scheduling constraint.
+message AffinityRule {
+  // Worker label key to match against.
+  string key = 1;
+
+  // Comparison operator.
+  AffinityOperator operator = 2;
+
+  // Values to match (required for In, NotIn, Gt, Gte, Lt, Lte operators).
+  repeated string values = 3;
+}
+
+// WeightedAffinityRule is an affinity rule with a preference weight.
+message WeightedAffinityRule {
+  // Worker label key to match against.
+  string key = 1;
+
+  // Comparison operator.
+  AffinityOperator operator = 2;
+
+  // Values to match.
+  repeated string values = 3;
+
+  // Preference weight (0-100). Higher weight means stronger preference.
+  int32 weight = 4;
+}
+
+// Affinity declares scheduling constraints for job placement.
+message Affinity {
+  // Hard constraints. The backend MUST NOT dispatch to a non-matching worker.
+  repeated AffinityRule required = 1;
+
+  // Soft constraints. The backend SHOULD prefer matching workers.
+  repeated WeightedAffinityRule preferred = 2;
+}
+
+// ResourceReservation references a pre-allocated capacity guarantee.
+message ResourceReservation {
+  // Identifier of the resource reservation.
+  string reservation_id = 1;
+
+  // Maximum seconds the reservation is held before automatic release.
+  int32 timeout_seconds = 2;
+}
+
+// WorkerMLCapabilities advertises a worker's ML hardware and software capabilities.
+message WorkerMLCapabilities {
+  // Accelerator type available on this worker.
+  AcceleratorType accelerator = 1;
+
+  // GPU capabilities (if accelerator is GPU).
+  WorkerGPUCapability gpu = 2;
+
+  // TPU capabilities (if accelerator is TPU).
+  WorkerTPUCapability tpu = 3;
+
+  // Available CPU cores.
+  int32 cpu_cores = 4;
+
+  // Available system memory in GB.
+  float memory_gb = 5;
+
+  // Available scratch storage in GB.
+  float storage_gb = 6;
+
+  // Available shared memory in GB.
+  float shm_size_gb = 7;
+
+  // Models currently loaded and ready for inference.
+  repeated LoadedModel models_loaded = 8;
+
+  // ML runtimes available on this worker.
+  repeated MLRuntime runtimes = 9;
+
+  // Worker labels for affinity and node selector matching.
+  map<string, string> labels = 10;
+}
+
+// WorkerGPUCapability describes a worker's GPU resources.
+message WorkerGPUCapability {
+  // GPU model identifier.
+  string type = 1;
+
+  // Number of GPU devices available.
+  int32 count = 2;
+
+  // GPU VRAM per device in GB.
+  float memory_gb = 3;
+
+  // NVIDIA compute capability version.
+  string compute_capability = 4;
+
+  // Interconnect type between GPUs.
+  GPUInterconnect interconnect = 5;
+}
+
+// WorkerTPUCapability describes a worker's TPU resources.
+message WorkerTPUCapability {
+  // TPU version.
+  TPUType type = 1;
+
+  // Available topology shape.
+  string topology = 2;
+
+  // Number of TPU chips available.
+  int32 chip_count = 3;
+}
+
+// LoadedModel describes a model currently loaded on a worker.
+message LoadedModel {
+  // Model identifier.
+  string model_id = 1;
+
+  // Model version.
+  string model_version = 2;
+
+  // Model format.
+  ModelFormat format = 3;
+}
+
+// CheckpointMetadata stores information about a saved checkpoint.
+message CheckpointMetadata {
+  // Job ID this checkpoint belongs to.
+  string job_id = 1;
+
+  // Training epoch at checkpoint time.
+  int32 epoch = 2;
+
+  // Global training step at checkpoint time.
+  int64 step = 3;
+
+  // Training loss at checkpoint time.
+  double loss = 4;
+
+  // Storage key or URI for the checkpoint data.
+  string storage_key = 5;
+
+  // Timestamp when the checkpoint was saved (RFC 3339).
+  string created_at = 6;
+
+  // Additional checkpoint metadata.
+  map<string, string> metadata = 7;
+}
+
+// AcceleratorType identifies the type of compute accelerator.
+enum AcceleratorType {
+  ACCELERATOR_TYPE_UNSPECIFIED = 0;
+  ACCELERATOR_TYPE_CPU = 1;
+  ACCELERATOR_TYPE_GPU = 2;
+  ACCELERATOR_TYPE_TPU = 3;
+  ACCELERATOR_TYPE_FPGA = 4;
+}
+
+// GPUInterconnect identifies the interconnect type between GPU devices.
+enum GPUInterconnect {
+  GPU_INTERCONNECT_UNSPECIFIED = 0;
+  GPU_INTERCONNECT_ANY = 1;
+  GPU_INTERCONNECT_PCIE = 2;
+  GPU_INTERCONNECT_NVLINK = 3;
+}
+
+// TPUType identifies the Google TPU version.
+enum TPUType {
+  TPU_TYPE_UNSPECIFIED = 0;
+  TPU_TYPE_V4 = 1;
+  TPU_TYPE_V5E = 2;
+  TPU_TYPE_V5P = 3;
+  TPU_TYPE_V6E = 4;
+}
+
+// ModelProvider identifies where a model is hosted.
+enum ModelProvider {
+  MODEL_PROVIDER_UNSPECIFIED = 0;
+  MODEL_PROVIDER_OPENAI = 1;
+  MODEL_PROVIDER_ANTHROPIC = 2;
+  MODEL_PROVIDER_GOOGLE = 3;
+  MODEL_PROVIDER_HUGGINGFACE = 4;
+  MODEL_PROVIDER_REPLICATE = 5;
+  MODEL_PROVIDER_LOCAL = 6;
+  MODEL_PROVIDER_CUSTOM = 7;
+}
+
+// ModelFormat identifies the serialization format of model weights.
+enum ModelFormat {
+  MODEL_FORMAT_UNSPECIFIED = 0;
+  MODEL_FORMAT_SAFETENSORS = 1;
+  MODEL_FORMAT_GGUF = 2;
+  MODEL_FORMAT_ONNX = 3;
+  MODEL_FORMAT_TORCHSCRIPT = 4;
+  MODEL_FORMAT_SAVEDMODEL = 5;
+  MODEL_FORMAT_CUSTOM = 6;
+}
+
+// PriorityClass for resource allocation and preemption ordering.
+enum PriorityClass {
+  PRIORITY_CLASS_UNSPECIFIED = 0;
+  PRIORITY_CLASS_SPOT = 1;
+  PRIORITY_CLASS_ON_DEMAND = 2;
+  PRIORITY_CLASS_RESERVED = 3;
+}
+
+// MLRuntime identifies the ML framework or serving runtime.
+enum MLRuntime {
+  ML_RUNTIME_UNSPECIFIED = 0;
+  ML_RUNTIME_PYTORCH = 1;
+  ML_RUNTIME_TENSORFLOW = 2;
+  ML_RUNTIME_ONNX = 3;
+  ML_RUNTIME_TRITON = 4;
+  ML_RUNTIME_VLLM = 5;
+  ML_RUNTIME_TGI = 6;
+  ML_RUNTIME_CUSTOM = 7;
+}
+
+// Precision identifies the numerical precision for computation.
+enum Precision {
+  PRECISION_UNSPECIFIED = 0;
+  PRECISION_FP32 = 1;
+  PRECISION_FP16 = 2;
+  PRECISION_BF16 = 3;
+  PRECISION_FP8 = 4;
+  PRECISION_INT8 = 5;
+  PRECISION_INT4 = 6;
+}
+
+// DistributedStrategy identifies the parallelism strategy.
+enum DistributedStrategy {
+  DISTRIBUTED_STRATEGY_UNSPECIFIED = 0;
+  DISTRIBUTED_STRATEGY_NONE = 1;
+  DISTRIBUTED_STRATEGY_DATA_PARALLEL = 2;
+  DISTRIBUTED_STRATEGY_TENSOR_PARALLEL = 3;
+  DISTRIBUTED_STRATEGY_PIPELINE_PARALLEL = 4;
+  DISTRIBUTED_STRATEGY_FSDP = 5;
+  DISTRIBUTED_STRATEGY_DEEPSPEED = 6;
+}
+
+// AffinityOperator defines comparison logic for affinity rules.
+enum AffinityOperator {
+  AFFINITY_OPERATOR_UNSPECIFIED = 0;
+  AFFINITY_OPERATOR_IN = 1;
+  AFFINITY_OPERATOR_NOT_IN = 2;
+  AFFINITY_OPERATOR_EXISTS = 3;
+  AFFINITY_OPERATOR_DOES_NOT_EXIST = 4;
+  AFFINITY_OPERATOR_GT = 5;
+  AFFINITY_OPERATOR_GTE = 6;
+  AFFINITY_OPERATOR_LT = 7;
+  AFFINITY_OPERATOR_LTE = 8;
+}
