@@ -311,7 +311,7 @@ message ManifestRequest {}
 // See: ojs-conformance.md (Conformance Manifest)
 // See: ojs-grpc-binding.md Section 6.2 (ManifestResponse)
 message ManifestResponse {
-  // OJS specification version (e.g., "1.0.0-rc.1").
+  // OJS specification version (e.g., "1.0").
   //
   // See: ojs-core.md Section 5.1 (specversion)
   string ojs_version = 1;
