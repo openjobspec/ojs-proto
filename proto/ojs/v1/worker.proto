@@ -242,3 +242,4 @@ message StreamJobsRequest {
 // each received job via separate unary RPCs.
 //
 // See: ojs-grpc-binding.md Section 10.1 (StreamJobs semantics)
+
