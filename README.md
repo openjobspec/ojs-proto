@@ -130,4 +130,3 @@ import { OJSService } from "./generated/ts/ojs/v1/service_pb";
 ## License
 
 Apache 2.0 -- see [LICENSE](./LICENSE).
-
