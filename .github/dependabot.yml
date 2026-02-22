@@ -8,3 +8,4 @@ updates:
       - "ci"
     commit-message:
       prefix: "chore(ci):"
+
