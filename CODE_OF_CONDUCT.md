@@ -28,4 +28,3 @@ GitHub Security Advisory submission.
 
 All reports will be reviewed and handled promptly and fairly.
 
-
