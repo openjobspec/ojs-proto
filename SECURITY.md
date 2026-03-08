@@ -22,4 +22,3 @@ Do not open public issues for undisclosed vulnerabilities.
 ## Response expectations
 
 Maintainers will acknowledge valid reports, investigate impact, and publish a fix with release notes as soon as practical.
-
